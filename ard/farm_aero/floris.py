@@ -1,13 +1,19 @@
 from pathlib import Path
 from os import PathLike
+from scipy.interpolate import interp1d
 import numpy as np
+import pandas as pd
 import yaml
 import copy
+import dill as pickle
+import torch
+import gpytorch
 
 import floris
 
 import ard.utils.io
 import ard.farm_aero.templates as templates
+from ard.utils.mathematics import smooth_max
 
 
 def create_FLORIS_turbine(
@@ -172,6 +178,58 @@ class FLORISFarmComponent:
         thrust_turbines = CT_turbines * (0.5 * rho_floris * A_floris * V_turbines**2)
         return thrust_turbines.T
 
+    def get_tower_base_load(self):
+        SATI = self.fmodel.get_turbine_SATI() * 100
+        SAWS = self.fmodel.get_turbine_SAWS()
+
+        SATI_collapsed = SATI.reshape(-1, SATI.shape[-1])
+        SAWS_collapsed = SAWS.reshape(-1, SAWS.shape[-1])
+
+        Omega = self.rotor_speed_interp(np.mean(SAWS_collapsed, axis=1))
+        Pitch = self.pitch_interp(np.mean(SAWS_collapsed, axis=1))
+        Yaw = np.zeros_like(Pitch)
+
+        # [SAWSup SAWSright SAWSdown SAWSleft SATIup SATIright SATIdown SATIleft Yaw Omega Pitch]
+        input_data = torch.from_numpy(np.concatenate(
+            (
+                SAWS_collapsed,
+                SATI_collapsed,
+                Omega[:, None],
+                Pitch[:, None],
+                Yaw[:, None],
+            ),
+            axis=1,
+        ))
+
+        # Make predictions by feeding model through likelihood
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            observed_pred_norm = self.likelihood(self.model(
+                (input_data - self.mu_x_train) / self.sigma_x_train
+            ))
+
+        observed_pred = (
+            observed_pred_norm.mean.numpy() * self.sigma_t_train.numpy() + self.mu_t_train.numpy()
+        )
+
+        weighted_observed_pred = np.zeros_like (observed_pred)
+
+        n_turbs = self.N_turbines
+        for i, f in enumerate(self.wind_rose.freq_table.flatten()):
+            weighted_observed_pred[i * n_turbs: i * n_turbs + n_turbs] = observed_pred[i * n_turbs: i * n_turbs + n_turbs] * f
+
+        # print(np.shape(input_data))
+        # print(np.shape(observed_pred))
+        # print(np.shape(weighted_observed_pred))
+        # lkj
+
+        # return smooth_max(observed_pred)
+
+        # return np.mean(
+        #     observed_pred_norm.mean.numpy() * self.sigma_t_train.numpy() + self.mu_t_train.numpy()
+        # )
+
+        return np.sum(weighted_observed_pred)
+
     def dump_floris_yamlfile(self, dir_output=None):
         """
         Export the current FLORIS inputs to a YAML file file for reproducibility of the analysis.
@@ -181,6 +239,18 @@ class FLORISFarmComponent:
         if dir_output is None:
             dir_output = self.dir_floris
         self.fmodel.core.to_file(Path(dir_output, "batch.yaml"))
+
+
+class MultidimensionalGP(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood):
+        super().__init__(train_x, train_y, likelihood)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
 class FLORISBatchPower(templates.BatchFarmPowerTemplate, FLORISFarmComponent):
@@ -362,6 +432,82 @@ class FLORISAEP(templates.FarmAEPTemplate):
         outputs["power_farm"] = FLORISFarmComponent.get_power_farm(self)
         outputs["power_turbines"] = FLORISFarmComponent.get_power_turbines(self)
         outputs["thrust_turbines"] = FLORISFarmComponent.get_thrust_turbines(self)
+
+    def setup_partials(self):
+        FLORISFarmComponent.setup_partials(self)
+
+
+class FLORISTowerBaseLoad(FLORISAEP):
+    """
+    Component class for computing surrogate tower base loads using FLORIS.
+    """
+
+    def initialize(self):
+        super().initialize()  # run super class script first!
+        # FLORISFarmComponent.initialize(self)  # add on FLORIS superclass
+
+    def setup(self):
+        super().setup()  # run super class script first!
+        # FLORISFarmComponent.setup(self)  # setup a FLORIS run
+
+        # add grid farm-specific inputs
+        # self.add_input("spacing_primary", 7.0)
+        # self.add_input("spacing_secondary", 7.0)
+        # self.add_input("angle_orientation", 0.0, units="deg")
+        # self.add_input("angle_skew", 0.0, units="deg")
+
+        self.add_output(
+            "tower_base_load",
+            0.0,
+            units="kN*m",
+            desc="maximum tower base load across all wind conditions",
+        )
+
+        loads_model = "surrogate_inputs/GPR_trained_50_iters.pth"
+        turb_perf_data = pd.read_csv('surrogate_inputs/performance_ccblade.dat', delimiter='\t') 
+        
+        with open('surrogate_inputs/train_data.p', 'rb') as f:
+            train_data = pickle.load(f)
+
+        self.x_train_norm = train_data[0]
+        self.t_train_norm = train_data[1]
+        self.mu_x_train = train_data[2]
+        self.sigma_x_train = train_data[3]
+        self.mu_t_train = train_data[4]
+        self.sigma_t_train = train_data[5]
+
+        state_dict = torch.load(loads_model, weights_only=True)
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood()
+        self.model = MultidimensionalGP(self.x_train_norm, self.t_train_norm, self.likelihood)
+        self.model.load_state_dict(state_dict)
+
+        # Get into evaluation (predictive posterior) mode
+        self.model.eval()
+        self.likelihood.eval()
+
+        self.rotor_speed_interp = interp1d(
+            turb_perf_data["# Wind speed (m/s) "],
+            turb_perf_data[" Rotor rotational speed (rpm) "],
+            kind='linear',
+            bounds_error=False,
+            fill_value=(0.0),
+        )
+
+        self.pitch_interp = interp1d(
+            turb_perf_data["# Wind speed (m/s) "],
+            turb_perf_data[" Pitch angle (deg) "],
+            kind='linear',
+            bounds_error=False,
+            fill_value=(3.92, 27.2),
+        )
+
+    def setup_partials(self):
+        super().setup_partials()
+
+    def compute(self, inputs, outputs):
+        super().compute(inputs, outputs)
+        outputs["tower_base_load"] = FLORISFarmComponent.get_tower_base_load(self)
+        outputs["AEP_farm"] = FLORISFarmComponent.get_AEP_farm(self)
 
     def setup_partials(self):
         FLORISFarmComponent.setup_partials(self)

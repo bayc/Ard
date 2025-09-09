@@ -101,6 +101,17 @@ def create_setup_OM_problem(
     )
     farmaero_global_output_promotes = ["AEP_farm"]
 
+    group_layout2aep.add_subsystem(  # FLORIS tower base load component
+        "loadsFLORIS",
+        farmaero_floris.FLORISTowerBaseLoad(
+            modeling_options=modeling_options,
+            wind_rose=wind_rose,
+            case_title="loads_surrogate",
+        ),
+        promotes=["x_turbines", "y_turbines", "tower_base_load"],
+    )
+    farmaero_global_output_promotes = ["tower_base_load"]
+
     group_layout2aep.approx_totals(
         method="fd", step=1e-3, form="central", step_calc="rel_avg"
     )

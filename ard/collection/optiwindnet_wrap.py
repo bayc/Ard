@@ -1,4 +1,6 @@
+import os
 import numpy as np
+import dill as pickle
 
 from optiwindnet.mesh import make_planar_embedding as own_make_planar_embedding
 from optiwindnet.interarraylib import G_from_S as own_G_from_S
@@ -6,6 +8,10 @@ from optiwindnet.interarraylib import L_from_site as own_L_from_site
 from optiwindnet.heuristics import EW_presolver as own_EW_presolver
 from optiwindnet.pathfinding import PathFinder as OWNPathFinder
 from optiwindnet.MILP import pyomo as own_pyomo
+
+import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
+import optiwindnet.plotting
 
 from pyomo import environ as pyo
 
@@ -167,10 +173,17 @@ class optiwindnetCollection(templates.CollectionTemplate):
     def initialize(self):
         """Initialization of OM component."""
         super().initialize()
+        self.options.declare("case_title")
 
     def setup(self):
         """Setup of OM component."""
         super().setup()
+
+        self.iter = 0
+
+        self.case_title = self.options["case_title"]
+
+        self.add_output("graph", np.zeros((self.N_turbines + 1,)))
 
     def setup_partials(self):
         """Setup of OM component gradients."""
@@ -240,6 +253,20 @@ class optiwindnetCollection(templates.CollectionTemplate):
         discrete_outputs["load_cables"] = np.array(loads, dtype=np.float64)
         outputs["total_length_cables"] = np.sum(discrete_outputs["length_cables"])
         discrete_outputs["max_load_cables"] = np.max(discrete_outputs["load_cables"])
+        outputs["graph"] = self.graph
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        optiwindnet.plotting.gplot(self.graph, ax=ax)
+
+        os.makedirs('optimization_demo_out/' + self.case_title + '/plots', exist_ok=True)
+        file_name = 'optimization_demo_out/' + self.case_title + '/plots/iter_' + str(self.iter) + '_graph.p'
+        with open(file_name, "wb") as file:
+            pickle.dump(H, file)
+        plt.savefig(
+            'optimization_demo_out/' + self.case_title + '/plots/iter_' + str(self.iter) + '.png'
+        )
+        plt.close()
+        self.iter += 1
 
     def compute_partials(self, inputs, J, discrete_inputs=None):
 

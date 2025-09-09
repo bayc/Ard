@@ -69,6 +69,48 @@ class FarmAeroTemplate(om.ExplicitComponent):
         )
 
 
+class FarmLoadTemplate(om.ExplicitComponent):
+    """
+    Template component for using a farm surrogate load model.
+    """
+
+    def initialize(self):
+        """Initialization of OM component."""
+        self.options.declare("modeling_options")
+
+    def setup(self):
+        """Setup of OM component."""
+        # load modeling options
+        self.modeling_options = self.options["modeling_options"]
+        self.N_turbines = self.modeling_options["farm"]["N_turbines"]
+
+        # set up inputs and outputs for farm layout
+        self.add_input("x_turbines", np.zeros((self.N_turbines,)), units="m")
+        self.add_input("y_turbines", np.zeros((self.N_turbines,)), units="m")
+        self.add_input(
+            "yaw_turbines",
+            np.zeros((self.N_turbines,)),
+            units="deg",
+        )
+
+    def compute(self, inputs, outputs):
+        """
+        Computation for the OM component.
+
+        For a template class this is not implemented and raises an error!
+        """
+
+        #############################################
+        #                                           #
+        # IMPLEMENT THE AERODYNAMICS COMPONENT HERE #
+        #                                           #
+        #############################################
+
+        raise NotImplementedError(
+            "This is an abstract class for a derived class to implement!"
+        )
+
+
 class BatchFarmPowerTemplate(FarmAeroTemplate):
     """
     Template component for computing power using a farm aerodynamics model.
@@ -295,3 +337,63 @@ class FarmAEPTemplate(FarmAeroTemplate):
         outputs["power_farm"] = np.zeros((self.N_wind_conditions,))
         outputs["power_turbines"] = np.zeros((self.N_turbines, self.N_wind_conditions))
         outputs["thrust_turbines"] = np.zeros((self.N_turbines, self.N_wind_conditions))
+
+
+class FarmTowerBaseLoadTemplate(FarmLoadTemplate):
+    """
+    A template component for computing tower base loads using a load surrogate model.
+    """
+
+    def initialize(self):
+        """Initialization of OM component."""
+        super().initialize()
+
+        # wind conditions for loads analysis are a FLORIS WindRose
+        self.options.declare("wind_rose")  # FLORIS WindRose object
+
+    def setup(self):
+        """Setup of OM component."""
+        super().setup()
+
+        # unpack FLORIS wind data object
+        self.wind_rose = self.options["wind_rose"]
+        self.directions_wind, self.speeds_wind, self.TIs_wind, self.pmf_wind, _, _ = (
+            self.wind_rose.unpack()
+        )
+        self.N_wind_conditions = len(self.pmf_wind)
+
+        # add the outputs we want for an AEP analysis:
+        #   - AEP estimate
+        #   - farm and turbine powers
+        #   - turbine thrusts
+        self.add_output(
+            "tower_base_load",
+            0.0,
+            units="kN*m",
+        )
+        # ... more outputs can be added here
+
+    def setup_partials(self):
+        """Derivative setup for OM component."""
+        # the default (but not preferred!) derivatives are FDM
+        self.declare_partials("*", "*", method="fd")
+
+    def compute(self, inputs, outputs):
+        """
+        Computation for the OM component.
+
+        For a template class this is not implemented and raises an error!
+        """
+
+        #############################################
+        #                                           #
+        # IMPLEMENT THE AERODYNAMICS COMPONENT HERE #
+        #                                           #
+        #############################################
+
+        raise NotImplementedError(
+            "This is an abstract class for a derived class to implement!"
+        )
+
+        # the following should be set
+        outputs["tower_base_load"] = 0.0
