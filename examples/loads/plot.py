@@ -78,7 +78,7 @@ for i in [89]:
     fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.5, hspace=None)
 
     axes[0,0].plot(np.arange(len(objectives[0:i])), np.array(objectives[0:i]))
-    axes[0,0].set(xlabel='Iterations', ylabel='Weighted Sum Tower Base Load', title='Optimization History')
+    axes[0,0].set(xlabel='Iterations', ylabel='Weighted Sum Tower Base DEL', title='Optimization History')
     axes[0,0].grid()
 
     axes[0,1].plot(np.arange(len(AEPs[0:i])), np.array(AEPs[0:i]) / 1E9)
