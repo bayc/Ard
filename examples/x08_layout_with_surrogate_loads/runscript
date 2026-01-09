@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --ntasks=1
+#SBATCH --time=1:00:00
+#SBATCH --account=windse
+#SBATCH --partition=debug
+#SBATCH --mail-user=christopher.bay@nrel.gov
+#SBATCH --mail-type=All
+
+module purge
+module load conda
+
+conda activate nsga2
+
+python test.py
