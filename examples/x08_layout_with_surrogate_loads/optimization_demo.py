@@ -55,7 +55,7 @@ print("\n\nRESULTS:\n")
 pp.pprint(test_data)
 print("\n\n")
 
-optimize = False  # set to False to skip optimization
+optimize = True  # set to False to skip optimization
 if optimize:
     # run the optimization
     prob.run_driver()
@@ -101,9 +101,9 @@ if optimize:
 plot_and_save = True
 if plot_and_save is True:
     # Access the recorder data
-    # case_reader = om.CaseReader(prob.get_outputs_dir() / "cases.sql")
+    case_reader = om.CaseReader(prob.get_outputs_dir() / "cases.sql")
     # print(case_reader)
-    case_reader = om.CaseReader("case_files/ard_problem_out_60gen_80pop_10perTImod_260m/cases.sql")
+    # case_reader = om.CaseReader("case_files/ard_problem_out_60gen_80pop_10perTImod_260m/cases.sql")
 
     # Get all driver cases
     driver_cases = case_reader.list_cases("driver", out_stream=None)

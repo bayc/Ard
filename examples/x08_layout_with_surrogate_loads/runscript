@@ -3,7 +3,7 @@
 #SBATCH --time=1:00:00
 #SBATCH --account=windse
 #SBATCH --partition=debug
-#SBATCH --mail-user=christopher.bay@nrel.gov
+#SBATCH --mail-user=christopher.bay@nlr.gov
 #SBATCH --mail-type=All
 
 module purge
